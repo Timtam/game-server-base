@@ -1,18 +1,27 @@
 """Provides the Parser class."""
 
 import logging
+import sys
 from contextlib import contextmanager
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
     Dict,
+    Iterable,
     Iterator,
     List,
     Optional,
     Tuple,
     Type,
+    Union,
+    overload,
 )
+
+if sys.version_info >= (3, 7):
+    from re import Pattern
+else:
+    from re import _pattern_type as Pattern
 
 from .caller import Caller, DontStopException
 from .command import Command
@@ -105,7 +114,40 @@ class Parser:
         finally:
             logger.debug("Context manager closing.")
 
-    def command(self, func=None, **kwargs):
+    @overload
+    def command(
+        self,
+        *,
+        func: Callable[[Caller], None],
+        names: Union[str, Iterable[str]] = "",
+        description: str = "",
+        help: str = "",
+        args_regexp: Union[str, Pattern] = r"",
+        allowed: Callable[[Caller], bool] = lambda c: True,
+    ) -> Command:
+        ...
+
+    @overload
+    def command(
+        self,
+        *,
+        names: Union[str, Iterable[str]] = "",
+        description: str = "",
+        help: str = "",
+        args_regexp: Union[str, Pattern] = r"",
+        allowed: Callable[[Caller], bool] = lambda c: True,
+    ) -> Callable[[Callable[[Caller], None]], Command]:
+        ...
+
+    def command(
+        self,
+        func: Optional[Callable[[Caller], None]] = None,
+        names: Union[str, Iterable[str]] = "",
+        description: str = "",
+        help: str = "",
+        args_regexp: Union[str, Pattern] = r"",
+        allowed: Callable[[Caller], bool] = lambda c: True,
+    ) -> Union[Command, Callable[[Callable[[Caller], None]], Command]]:
         """
         A decorator to add a command to this parser.
 
@@ -114,14 +156,18 @@ class Parser:
         methods of this parser.
         """
 
-        def inner(func):
-            names = kwargs.pop("names", self.make_command_names(func))
-            description = kwargs.pop("description", self.make_command_description(func))
-            help = kwargs.pop("help", self.make_command_help(func))
-            args_regexp = kwargs.pop("args_regexp", self.default_args_regexp)
-            allowed = kwargs.pop("allowed", lambda caller: True)
+        def inner(func: Callable[[Caller], None]) -> Command:
+            names = names or self.make_command_names(func)
+            description = description or self.make_command_description(func)
+            help = help or self.make_command_help(func)
+            args_regexp = args_regexp or self.default_args_regexp
             c = self.command_class(
-                func, names, description, help, args_regexp, allowed, **kwargs
+                func=func,
+                names=names,
+                description=description,
+                help=help,
+                args_regexp=args_regexp,
+                allowed=allowed,
             )
             for name in c.names:
                 lst = self.commands.get(name, [])

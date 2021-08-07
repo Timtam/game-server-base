@@ -8,7 +8,7 @@ if sys.version_info >= (3, 7):
 else:
     from re import _pattern_type as Pattern
 
-from typing import Callable, Iterable, Optional, Union, cast
+from typing import Any, Callable, Iterable, Optional, Union, cast
 
 from .caller import Caller
 
@@ -45,6 +45,8 @@ class Command:
         help: str,
         args_regexp: Optional[Union[str, Pattern]],
         allowed: Optional[Callable[[Caller], bool]],
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
 
         self.func = func
