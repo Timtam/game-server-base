@@ -23,12 +23,14 @@ Calls callback with *args and **kwargs after the body has been executed.
 """
 
 from contextlib import contextmanager
-from attr import attrs, attrib, Factory
+from typing import Any, Callable, List, Optional, Union
+
 from .caller import Caller
+from .command import Command
 from .parser import Parser
+from .protocol import Protocol
 
 
-@attrs
 class Intercept(Parser):
     """
     Use instances of this class to intercept normal command processing.
@@ -51,37 +53,44 @@ class Intercept(Parser):
     self.no_abort for example), consider using self.send.
     """
 
-    abort_command = attrib(default=Factory(lambda: '@abort'))
-    aborted = attrib(default=Factory(lambda: 'Aborted.'))
-    no_abort = attrib(default=Factory(lambda: None))
-    restore_parser = attrib(default=Factory(lambda: None))
+    def __init__(
+        self,
+        abort_command: str = "@abort",
+        aborted: str = "Aborted",
+        no_abort: Optional[Callable[[Caller], bool]] = None,
+        restore_parser: Optional[Parser] = None,
+    ) -> None:
 
-    def send(self, value, caller):
+        super().__init__()
+
+        self.abort_command = abort_command
+        self.aborted = aborted
+        self.no_abort = None
+        self.restore_parser = None
+
+    def send(self, value: Union[Callable[[Caller], None], str], caller: Caller) -> None:
         """If value is a callable call it with caller. Otherwise use
         caller.connection.notify to send it to a connection."""
         if callable(value):
             value(caller)
-        else:
+        elif caller.connection:
             caller.connection.notify(value)
 
-    def do_abort(self, caller):
+    def do_abort(self, caller: Caller) -> bool:
         """Try to abort this caller."""
         if self.no_abort:
             self.send(self.no_abort, caller)
         else:
             self.send(self.aborted, caller)
-            caller.connection.parser = self.restore_parser
+            if caller.connection:
+                caller.connection.parser = self.restore_parser
         return True
 
-    def explain(self, connection):
-        """Tell the connection what we do. Called by self.on_attach."""
-        pass
-
-    def on_attach(self, connection, old_parser):
+    def on_attach(self, connection: Protocol, old_parser: Optional[Parser]) -> None:
         """Explain this instance to connnection."""
         self.explain(connection)
 
-    def huh(self, caller):
+    def huh(self, caller: Caller) -> bool:
         """Check for self.abort_command."""
         line = caller.text
         if line == self.abort_command:
@@ -89,8 +98,11 @@ class Intercept(Parser):
         else:
             return False
 
+    def explain(self, connection: Protocol) -> None:  # type: ignore
 
-@attrs
+        pass
+
+
 class MenuItem:
     """A menu item.
 
@@ -100,24 +112,23 @@ class MenuItem:
     func
     The function which is called when this item is matched. Should be prepared
     to take an instance of Caller as it's only argument.
-    index
-    The index of this item. Set automatically by Menu.__attrs_post_init__.
     """
 
-    text = attrib()
-    func = attrib()
-    index = attrib(default=Factory(lambda: None), init=False)
+    def __init__(self, text: str, func: Callable[[Caller], None]) -> None:
 
-    def __str__(self):
+        self.text = text
+        self.func = func
+        self.index = 0
+
+    def __str__(self) -> str:
         """Return text suitable for printing to a connection."""
         return self.as_string()
 
-    def as_string(self):
+    def as_string(self) -> str:
         """Get a string representation of this item."""
-        return '[{0.index}] {0.text}'.format(self)
+        return "[{0.index}] {0.text}".format(self)
 
 
-@attrs
 class MenuLabel:
     """
     A menu heading.
@@ -128,27 +139,37 @@ class MenuLabel:
     The MenuItem instance this label comes after or None if it's at the
     beginning.
     """
-    text = attrib()
-    after = attrib()
 
-    def __str__(self):
+    def __init__(self, text: str, after: Optional[MenuItem]):
+
+        self.text = text
+        self.after = after
+
+    def __str__(self) -> str:
         return self.text
 
 
-@attrs
 class _MenuBase:
     """Provides the title and items attributes."""
-    title = attrib(default=Factory(lambda: 'Select an item:'))
-    items = attrib(default=Factory(list))
-    labels = attrib(default=Factory(list))
-    prompt = attrib(
-        default=Factory(lambda: 'Type a number or @abort to abort.')
-    )
-    no_matches = attrib(default=Factory(lambda: None))
-    multiple_matches = attrib(default=Factory(lambda: None))
+
+    def __init__(
+        self,
+        title: str = "Select an item:",
+        items: List[MenuItem] = [],
+        labels: List[MenuLabel] = [],
+        prompt: str = "Type a number or @abort to abort.",
+        no_matches: Optional[Callable[[Caller], None]] = None,
+        multiple_matches: Optional[Callable[[Caller, List[MenuItem]], None]] = None,
+    ):
+
+        self.title = title
+        self.items = items
+        self.labels = labels
+        self.prompt = prompt
+        self.no_matches = no_matches
+        self.multiple_matches = multiple_matches
 
 
-@attrs
 class Menu(Intercept, _MenuBase):
     """
     A menu object.
@@ -176,35 +197,58 @@ class Menu(Intercept, _MenuBase):
     Don't use self.restore_parser if no match is found.
     """
 
-    persistent = attrib(default=Factory(bool))
+    def __init__(
+        self,
+        title: str = "Select an item:",
+        items: List[MenuItem] = [],
+        labels: List[MenuLabel] = [],
+        prompt: str = "Type a number or @abort to abort.",
+        no_matches: Optional[Callable[[Caller], None]] = None,
+        multiple_matches: Optional[Callable[[Caller, List[MenuItem]], None]] = None,
+        persistent: bool = False,
+    ) -> None:
 
-    def __attrs_post_init__(self):
+        Intercept.__init__(self)
+        _MenuBase.__init__(
+            self,
+            title=title,
+            items=items,
+            labels=labels,
+            prompt=prompt,
+            no_matches=no_matches,
+            multiple_matches=multiple_matches,
+        )
+
+        self.persistent = persistent
+
         for item in self.items:
             item.index = self.items.index(item) + 1
 
-    def add_label(self, text, after):
+    def add_label(self, text: str, after: Optional[MenuItem]) -> MenuLabel:
         """Add a label."""
-        l = MenuLabel(text, after)
-        self.labels.append(l)
-        return l
+        lbl = MenuLabel(text, after)
+        self.labels.append(lbl)
+        return lbl
 
     def item(self, name):
         """A decorator to add an item with the specified name."""
+
         def inner(func):
             """Add the item."""
             i = MenuItem(name, func)
             self.items.append(i)
             self.__attrs_post_init__()
             return i
+
         return inner
 
-    def explain(self, connection):
+    def explain(self, connection: Protocol) -> None:  # type: ignore
         """Explain this menu to connection."""
         connection.notify(self.title)
         self.send_items(connection)
         self.send(self.prompt, Caller(connection))
 
-    def send_items(self, connection, items=None):
+    def send_items(self, connection: Protocol, items: Optional[List[MenuItem]] = None):
         """Send the provided items to connection. If items is None use
         self.items."""
         if items is None:
@@ -218,39 +262,48 @@ class Menu(Intercept, _MenuBase):
                 if label.after is i:
                     connection.notify(label.text)
 
-    def _no_matches(self, caller):
+    def _no_matches(self, caller: Caller) -> None:
         """The connection sent something but it doesn't match any of this menu's
         items."""
-        caller.connection.notify('Invalid selection.')
-        if not self.persistent:
-            caller.connection.parser = self.restore_parser
 
-    def _multiple_matches(self, caller, matches):
+        if caller.connection:
+            caller.connection.notify("Invalid selection.")
+            if not self.persistent:
+                caller.connection.parser = self.restore_parser
+
+    def _multiple_matches(self, caller: Caller, matches: List[MenuItem]) -> None:
         """The connection entered something but it matches multiple items."""
         connection = caller.connection
-        connection.notify('That matched multiple items:')
-        self.send_items(connection, items=matches)
-        connection.notify(self.prompt)
 
-    def huh(self, caller):
+        if connection:
+            connection.notify("That matched multiple items:")
+            self.send_items(connection, items=matches)
+            connection.notify(self.prompt)
+
+    def huh(self, caller: Caller) -> bool:
         """Search for a match in self.items."""
-        if super(Menu, self).huh(caller):
+        if super().huh(caller):
             return True
         m = self.match(caller)
         if m is not None:
-            caller.connection.parser = self.restore_parser
+            if caller.connection:
+                caller.connection.parser = self.restore_parser
             m.func(caller)
         else:
-            if self.persistent:
+            if self.persistent and caller.connection:
                 self.explain(caller.connection)
         return True
 
-    def match(self, caller):
+    def match(self, caller: Caller) -> Optional[MenuItem]:
         """Sent by the server when a menu is found. Returns either an item or
         None if no or multiple matches were found (a case which is handled by
         this function)."""
+
+        if not caller.text:
+            return None
+
         text = caller.text.lower()
-        if text == '$':  # Return the last item.
+        if text == "$":  # Return the last item.
             return self.items[-1]
         try:
             num = int(text)
@@ -276,15 +329,17 @@ class Menu(Intercept, _MenuBase):
                 else:
                     self.multiple_matches(caller, items)
 
+        return None
 
-@attrs
+
 class _ReaderBase:
     """Provides the positional attributes of Reader."""
 
-    done = attrib()
+    def __init__(self, done: Optional[Callable[[Caller], None]]) -> None:
+
+        self.done = done
 
 
-@attrs
 class Reader(Intercept, _ReaderBase):
     """Read 1 or more lines from the user.
 
@@ -319,102 +374,109 @@ class Reader(Intercept, _ReaderBase):
     The text received so far.
     """
 
-    prompt = attrib(default=Factory(lambda: None))
-    line_separator = attrib(default=Factory(lambda: '\n'))
-    done_command = attrib(default=Factory(lambda: '.'))
-    spell_check_command = attrib(default=Factory(lambda: '.spell'))
-    multiline = attrib(Factory(bool))
-    before_line = attrib(default=Factory(lambda: None))
-    after_line = attrib(default=Factory(lambda: None))
-    buffer = attrib(default=Factory(str))
-    done=attrib(default=Factory(lambda: None))
-    
+    def __init__(
+        self,
+        prompt: Optional[Union[str, Callable[[Caller], None]]] = None,
+        line_separator: str = "\n",
+        done_command: str = ".",
+        spell_check_command: str = ".spell",
+        multiline: bool = False,
+        before_line: Optional[Union[str, Callable[[Caller], None]]] = None,
+        after_line: Optional[Union[str, Callable[[Caller], None]]] = None,
+        buffer: str = "",
+        done: Optional[Callable[[Caller], None]] = None,
+    ):
 
-    def explain(self, connection):
+        _ReaderBase.__init__(self, done=done)
+        Intercept.__init__(self)
+
+        self.prompt = prompt
+        self.line_separator = line_separator
+        self.done_command = done_command
+        self.spell_check_command = spell_check_command
+        self.multiline = multiline
+        self.before_line = before_line
+        self.after_line = after_line
+        self.buffer = buffer
+
+    def explain(self, connection: Protocol) -> None:  # type: ignore
         """Explain this reader."""
         caller = Caller(connection, text=self.buffer)
         if self.prompt is None:
             if self.multiline:
                 connection.notify(
-                    'Enter lines of text. Type %s on a blank '
-                    'line to finish%s.',
+                    "Enter lines of text. Type %s on a blank " "line to finish%s.",
                     self.done_command,
-                    (
-                        ' or %s to exit' % self.abort_command
-                    ) if self.no_abort is None else ''
+                    (" or %s to exit" % self.abort_command)
+                    if self.no_abort is None
+                    else "",
                 )
             else:
                 connection.notify(
-                    'Enter a line of text%s.',
-                    (
-                        ' or %s to exit' % self.abort_command
-                    ) if self.no_abort is None else ''
+                    "Enter a line of text%s.",
+                    (" or %s to exit" % self.abort_command)
+                    if self.no_abort is None
+                    else "",
                 )
         else:
             self.send(self.prompt, caller)
         if self.before_line is not None:
-            self.send(
-                self.before_line,
-                caller
-            )
+            self.send(self.before_line, caller)
 
-    def huh(self, caller):
+    def huh(self, caller: Caller) -> bool:
         """Add the line of text to the buffer."""
         line = caller.text
         if self.after_line is not None:
             self.send(self.after_line, caller)
-        if super(Reader, self).huh(caller):
+        if super().huh(caller):
             return True
-        elif line == self.spell_check_command:
-            m = caller.connection.server.get_spell_checker(caller)
-            if m is not None:
-                caller.connection.notify(
-                    m,
-                    self.buffer,
-                    self.restore,
-                    restore_parser=None
-                )
+        if caller.connection:
+            if line == self.spell_check_command:
+                m = caller.connection.server.get_spell_checker(caller)
+                if m is not None:
+                    caller.connection.notify(
+                        m, self.buffer, self.restore, restore_parser=None
+                    )
+                else:
+                    caller.connection.notify(
+                        "Spell checking is not available on this system."
+                    )
+                return True
+            elif not self.multiline or line != self.done_command:
+                if self.buffer and line:
+                    self.buffer = self.line_separator.join([self.buffer, line])
+                elif caller.text:
+                    self.buffer = caller.text
+            caller.text = self.buffer
+            if not self.multiline or line == self.done_command:
+                caller.connection.parser = self.restore_parser
+                if self.done:
+                    self.done(caller)
+                return True
             else:
-                caller.connection.notify(
-                    'Spell checking is not available on this system.'
-                )
-            return True
-        elif not self.multiline or line != self.done_command:
-            if self.buffer:
-                self.buffer = self.line_separator.join(
-                    [
-                        self.buffer,
-                        line
-                    ]
-                )
-            else:
-                self.buffer = caller.text
-        caller.text = self.buffer
-        if not self.multiline or line == self.done_command:
-            caller.connection.parser = self.restore_parser
-            self.done(caller)
-            return True
-        else:
-            if self.before_line is not None:
-                self.send(self.before_line, caller)
-            return False
+                if self.before_line is not None:
+                    self.send(self.before_line, caller)
+        return False
 
-    def restore(self, caller):
+    def restore(self, caller: Caller) -> None:
         """Restore from a spell checker menu."""
-        caller.connection.notify('Spell checking complete.')
-        self.buffer = caller.text
-        caller.connection.parser = self
+        if caller.connection:
+            caller.connection.notify("Spell checking complete.")
+            caller.connection.parser = self
+
+        if caller.text:
+            self.buffer = caller.text
 
 
-@attrs
 class _YesOrNoBase:
     """The base which makes up the YesOrNo class."""
 
-    question = attrib()
-    yes = attrib()
+    def __init__(self, question: str, yes: Callable[[Caller], None]) -> None:
+
+        self.question = question
+        self.yes = yes
 
 
-@attrs
 class YesOrNo(Intercept, _YesOrNoBase):
     """Send this to a connection to ask a simple yes or no question.
 
@@ -429,48 +491,50 @@ class YesOrNo(Intercept, _YesOrNoBase):
     The prompt which is sent after the question to tell the user what to do.
     """
 
-    no = attrib(default=Factory(lambda: None))
-    prompt = attrib(default=Factory(lambda: None))
-    yes=attrib(default=Factory(lambda: None))
-    question=attrib(default=Factory(str))
+    def __init__(
+        self,
+        question: str,
+        yes: Callable[[Caller], None],
+        no: Optional[Callable[[Caller], None]] = None,
+        prompt: Optional[str] = None,
+    ):
 
-    def __attrs_post_init__(self):
+        Intercept.__init__(self)
+        _YesOrNoBase.__init__(self, question=question, yes=yes)
+
+        self.no = no
+        self.prompt = prompt
+
         if self.prompt is None:
-            self.prompt = 'Enter "yes" or "no" or %s to abort the command.' % \
-                self.abort_command
+            self.prompt = (
+                'Enter "yes" or "no" or %s to abort the command.' % self.abort_command
+            )
 
-    def explain(self, connection):
+    def explain(self, connection: Protocol) -> None:  # type: ignore
         """Send the connection our question."""
         connection.notify(self.question)
         connection.notify(self.prompt)
 
-    def huh(self, caller):
+    def huh(self, caller: Caller) -> bool:
         """Check for yes or no."""
-        if not super(YesOrNo, self).huh(caller):
-            caller.connection.parser = self.restore_parser
-            if caller.text.lower().startswith('y'):
-                self.yes(caller)
-            else:
-                if self.no is not None:
-                    self.no(caller)
+        if not super().huh(caller):
+            if caller.text:
+                if caller.connection:
+                    caller.connection.parser = self.restore_parser
+                if caller.text.lower().startswith("y"):
+                    self.yes(caller)
                 else:
-                    self.do_abort(caller)
+                    if self.no is not None:
+                        self.no(caller)
+                    else:
+                        self.do_abort(caller)
+
+                return True
+        return False
 
 
 @contextmanager
-def after(_f, *args, **kwargs):
+def after(_f: Callable[..., None], *args: Any, **kwargs: Any):
     """Call _f(*args, **kwargs) after everything else has been done."""
     yield
     _f(*args, **kwargs)
-
-
-__all__ = [
-    x.__name__ for x in [
-        Intercept,
-        MenuItem,
-        Menu,
-        Reader,
-        YesOrNo,
-        after
-    ]
-]

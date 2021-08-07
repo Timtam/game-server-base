@@ -1,10 +1,18 @@
 """Provides the Command class."""
 
-from re import compile, _pattern_type
-from attr import attrs, attrib
+import sys
+from re import compile
+
+if sys.version_info >= (3, 7):
+    from re import Pattern
+else:
+    from re import _pattern_type as Pattern
+
+from typing import Callable, Iterable, Optional, Union, cast
+
+from .caller import Caller
 
 
-@attrs
 class Command:
     """
     Command
@@ -29,20 +37,34 @@ class Command:
     to run this command, False otherwise.
     """
 
-    func = attrib()
-    names = attrib()
-    description = attrib()
-    help = attrib()
-    args_regexp = attrib()
-    allowed = attrib()
+    def __init__(
+        self,
+        func: Callable[[Caller], None],
+        names: Union[str, Iterable[str]],
+        description: str,
+        help: str,
+        args_regexp: Optional[Union[str, Pattern]],
+        allowed: Optional[Callable[[Caller], bool]],
+    ) -> None:
 
-    def __attrs_post_init__(self):
-        if self.args_regexp is not None:
-            if not isinstance(self.args_regexp, _pattern_type):
-                self.args_regexp = compile(self.args_regexp)
-        if not isinstance(self.names, (list, tuple)):
-            self.names = [self.names]
+        self.func = func
+        self.names = names
+        self.description = description
+        self.help = help
+        self.allowed = allowed
+        self.args_regexp: Optional[Pattern] = None
 
-    def ok_for(self, caller):
+        if args_regexp is not None:
+            if not isinstance(args_regexp, Pattern):
+                self.args_regexp = compile(args_regexp)
+            else:
+                self.args_regexp = args_regexp
+
+        try:
+            iter(names)
+        except TypeError:
+            self.names = [cast(str, self.names)]
+
+    def ok_for(self, caller: Caller) -> bool:
         """Check if caller is allowed to access this command."""
         return self.allowed is None or self.allowed(caller)

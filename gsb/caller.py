@@ -1,14 +1,20 @@
 """Provides the Caller class."""
 
-from attr import attrs, attrib, Factory
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Type
+
+if TYPE_CHECKING:
+
+    from re import Match
+
+    from .protocol import Protocol
 
 
 class DontStopException(Exception):
     """The exception raised by Caller.dont_stop."""
+
     pass
 
 
-@attrs
 class Caller:
     """A
     Caller
@@ -36,16 +42,28 @@ class Caller:
     An exception which is set by on_error.
     """
 
-    connection = attrib()
-    text = attrib(default=Factory(lambda: None))
-    command = attrib(default=Factory(str))
-    args_str = attrib(default=Factory(str))
-    match = attrib(default=Factory(lambda: None))
-    args = attrib(default=Factory(tuple))
-    kwargs = attrib(default=Factory(dict))
-    exception = attrib(default=Factory(lambda: None))
+    def __init__(
+        self,
+        connection: Optional["Protocol"],
+        text: Optional[str] = None,
+        command: str = "",
+        args_str: str = "",
+        match: Optional["Match"] = None,
+        args: Sequence[Any] = (),
+        kwargs: Dict = {},
+        exception: Optional[Exception] = None,
+    ):
 
-    def dont_stop(self):
+        self.connection = connection
+        self.text = text
+        self.command = command
+        self.args_str = args_str
+        self.match = match
+        self.args = args
+        self.kwargs = kwargs
+        self.exception = exception
+
+    def dont_stop(self) -> None:
         """If called from a command the command interpreter will not stop
         hunting for matching commands."""
         raise DontStopException()

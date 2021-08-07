@@ -2,85 +2,108 @@
 
 import logging
 from contextlib import contextmanager
-from attr import attrs, attrib, Factory
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+)
+
 from .caller import Caller, DontStopException
 from .command import Command
+
+if TYPE_CHECKING:
+    from .protocol import Protocol
 
 logger = logging.getLogger(__name__)
 
 
-@attrs
 class Parser:
     """
     Used for parsing commands.
     """
 
-    command_separator = attrib(default=Factory(lambda: ' '))
-    command_class = attrib(default=Factory(lambda: Command))
-    default_args_regexp = attrib(default=Factory(lambda: None))
-    commands = attrib(default=Factory(dict), repr=False)
-    command_substitutions = attrib(default=Factory(dict))
+    def __init__(
+        self,
+        command_separator: str = " ",
+        command_class: Type[Command] = Command,
+        default_args_regexp: Optional[str] = None,
+        commands: Dict[str, List[Command]] = {},
+        command_substitutions: Dict[str, str] = {},
+    ):
 
-    def all_commands(self):
+        self.command_separator = command_separator
+        self.command_class = command_class
+        self.default_args_regexp = default_args_regexp
+        self.commands = commands
+        self.command_substitutions = command_substitutions
+
+    def all_commands(self) -> List[Command]:
         """Get all the command objects present on this parser."""
-        l = list()
+        lst = list()
         for objects in self.commands.values():
             for cmd in objects:
-                if cmd not in l:
-                    l.append(cmd)
-        return l
+                if cmd not in lst:
+                    lst.append(cmd)
+        return lst
 
-    def huh(self, caller):
+    def huh(self, caller: Caller) -> bool:
         """Notify the connection that we have no idea what it's on about."""
-        caller.connection.notify("I don't understand that.")
+        if caller.connection:
+            caller.connection.notify("I don't understand that.")
         return True
 
-    def on_attach(self, connection, old_parser):
+    def on_attach(self, connection: "Protocol", old_parser: Optional["Parser"]) -> None:
         """This instance has been attached to connection to replace
         old_parser."""
         pass
 
-    def on_detach(self, connection, new_parser):
+    def on_detach(self, connection: "Protocol", new_parser: Optional["Parser"]) -> None:
         """This instance has been disconnected from connection and replaced by
         new_parser."""
         pass
 
-    def on_error(self, caller):
+    def on_error(self, caller: Caller) -> None:
         """An exception was raised by a command. In this instance caller has
         its exception attribute set to the exception which was thrown."""
-        caller.connection.notify('There was an error with your command.')
+        if caller.connection:
+            caller.connection.notify("There was an error with your command.")
 
-    def make_command_names(self, func):
+    def make_command_names(self, func: Callable[..., Any]) -> List[str]:
         """Get the name of a command from the name of a function."""
-        return [getattr(func, '__name__', 'command')]
+        return [getattr(func, "__name__", "command")]
 
-    def make_command_description(self, func):
+    def make_command_description(self, func: Callable[..., None]) -> str:
         """Make a suitable description for a command."""
-        return func.__doc__ or 'No description available.'
+        return func.__doc__ or "No description available."
 
-    def make_command_help(self, func):
+    def make_command_help(self, func: Callable[..., None]) -> str:
         """Make a suitable help message for a command."""
-        return 'No help available.'
+        return "No help available."
 
     @contextmanager
-    def default_kwargs(self, **kwargs):
+    def default_kwargs(self, **kwargs: Any) -> Iterator:
         """Decorator to automatically send kwargs to self.add_command."""
-        def f(*a, **kw):
+
+        def f(*a: Any, **kw: Any) -> Command:
             for key, value in kwargs.items():
                 if key in kw:
                     logger.warning(
-                        'Keyword argument %s specified twice: %r, %r.',
-                        key,
-                        kwargs,
-                        kw
+                        "Keyword argument %s specified twice: %r, %r.", key, kwargs, kw
                     )
                 kw[key] = value
             return self.command(*a, **kw)
+
         try:
-            logger.debug('Adding commands with default kwargs: %r.', kwargs)
+            logger.debug("Adding commands with default kwargs: %r.", kwargs)
             yield f
         finally:
-            logger.debug('Context manager closing.')
+            logger.debug("Context manager closing.")
 
     def command(self, func=None, **kwargs):
         """
@@ -90,91 +113,77 @@ class Parser:
         Arguments to the constructor will be guessed by the make_command_*
         methods of this parser.
         """
+
         def inner(func):
-            names = kwargs.pop(
-                'names',
-                self.make_command_names(func)
-            )
-            description = kwargs.pop(
-                'description',
-                self.make_command_description(func)
-            )
-            help = kwargs.pop(
-                'help',
-                self.make_command_help(func)
-            )
-            args_regexp = kwargs.pop('args_regexp', self.default_args_regexp)
-            allowed = kwargs.pop(
-                'allowed',
-                lambda caller: True
-            )
+            names = kwargs.pop("names", self.make_command_names(func))
+            description = kwargs.pop("description", self.make_command_description(func))
+            help = kwargs.pop("help", self.make_command_help(func))
+            args_regexp = kwargs.pop("args_regexp", self.default_args_regexp)
+            allowed = kwargs.pop("allowed", lambda caller: True)
             c = self.command_class(
-                func,
-                names,
-                description,
-                help,
-                args_regexp,
-                allowed,
-                **kwargs
+                func, names, description, help, args_regexp, allowed, **kwargs
             )
             for name in c.names:
-                l = self.commands.get(name, [])
-                l.append(c)
-                self.commands[name] = l
+                lst = self.commands.get(name, [])
+                lst.append(c)
+                self.commands[name] = lst
             return c
+
         if func is None:
             return inner
         return inner(func)
 
-    def pre_command(self, caller):
+    def pre_command(self, caller: Caller) -> bool:
         """Called before any command is sent. Should return True if the command
         is to be processed."""
         return True
 
-    def split(self, line):
+    def split(self, line: str) -> Tuple[str, ...]:
         """Splits the command and returns (command, args). Both args and string
         should be strings."""
         split = line.split(self.command_separator, 1)
         if len(split) == 1:
             split.append(split[0].__class__())
-        return split
+        return tuple(split)
 
-    def post_command(self, caller):
+    def post_command(self, caller: Caller) -> None:
         """Called after 0 or more commands were matched."""
         pass
 
-    def get_commands(self, name):
+    def get_commands(self, name: str) -> List[Command]:
         """Get the commands named name."""
         return self.commands.get(name, [])
 
-    def explain_substitution(self, connection, short, long):
+    def explain_substitution(
+        self, connection: "Protocol", short: str, long: str
+    ) -> None:
         """Explain command substitutions."""
         connection.notify(
             'Instead of typing "%s%s", you can type %s.',
             long,
             self.command_separator,
-            short
+            short,
         )
 
-    def explain(self, command, connection):
+    def explain(self, command: Command, connection: "Protocol") -> None:
         """Explain command to connection."""
-        connection.notify('%s:', ' or '.join(command.names))
+        connection.notify("%s:", " or ".join(command.names))
         for key, value in self.command_substitutions.items():
             if value in command.names:
                 self.explain_substitution(connection, key, value)
         connection.notify(command.description)
         connection.notify(command.help)
 
-    def handle_line(self, connection, line):
+    def handle_line(self, connection: "Protocol", line: str) -> Optional[int]:
         """Handle a line of textt from a connection. If no commands are found
         then self.huh is called with caller."""
         if line and line[0] in self.command_substitutions:
-            line = self.command_substitutions[
-                line[0]
-            ] + self.command_separator + line[1:]
+            line = (
+                self.command_substitutions[line[0]] + self.command_separator + line[1:]
+            )
         caller = Caller(connection, text=line)
         if not self.pre_command(caller):
-            return
+            return None
         command, args = self.split(line)
         caller.command = command
         caller.args_str = args
@@ -187,7 +196,8 @@ class Parser:
                 else:
                     m = cmd.args_regexp.match(args)
                     if m is None:
-                        self.explain(cmd, caller.connection)
+                        if caller.connection:
+                            self.explain(cmd, caller.connection)
                         break
                     caller.args = m.groups()
                     caller.kwargs = m.groupdict()
@@ -198,11 +208,7 @@ class Parser:
                 except DontStopException:
                     continue
                 except Exception as e:
-                    logger.warning(
-                        'Error caught by %r from command %r:',
-                        self,
-                        cmd
-                    )
+                    logger.warning("Error caught by %r from command %r:", self, cmd)
                     logger.exception(e)
                     caller.exception = e
                     self.on_error(caller)
@@ -211,3 +217,4 @@ class Parser:
                 self.huh(caller)
         if commands:
             return commands
+        return None

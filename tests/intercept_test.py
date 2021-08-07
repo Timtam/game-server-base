@@ -1,8 +1,8 @@
 """Test intercepts."""
 
 from pytest import raises
-from attr import attrs
 from gsb import Server, Protocol, Caller, intercept, Parser
+from typing import Optional
 
 
 class YesException(Exception):
@@ -34,16 +34,17 @@ class NotifyException(Exception):
     pass
 
 
-@attrs
 class _TestProtocol(Protocol):
     """Override sendLine."""
-    def __attrs_post_init__(self):
-        self.line = None
+    def __init__(self, server: Server, host: str, port: int, _parser: Parser) -> None:
+
+        super().__init__(server=server, host=host, port=port, _parser=_parser)
+        self.line: Optional[str] = None
         self.command = None
 
-    def sendLine(self, line):
-        line = line.decode()
-        self.line = line
+    def sendLine(self, line: bytes) -> None:
+        line_str = line.decode()
+        self.line = line_str
         raise NotifyException(line)
 
 

@@ -1,13 +1,17 @@
 """Contains the Server base class."""
 
 import logging
-from types import MethodType
-from inspect import isclass
 from datetime import datetime
+from inspect import isclass
+from types import MethodType
+from typing import Any, List, Optional, Type, Union, cast
+
 from twisted.internet import reactor
-from attr import attrs, attrib, Factory
+
 from .caller import Caller
 from .parser import Parser
+from .protocol import Protocol
+
 try:
     from .ext.spell_checker_menu import SpellCheckerMenu
 except ImportError:
@@ -17,7 +21,6 @@ from .factory import Factory as ServerFactory
 logger = logging.getLogger(__name__)
 
 
-@attrs
 class Server:
     """
     A game server instance.
@@ -37,71 +40,69 @@ class Server:
     The time the server was started with Server.run.
     """
 
-    port = attrib(default=Factory(lambda: 4000))
-    interface = attrib(default=Factory(lambda: '0.0.0.0'))
-    factory = attrib(default=Factory(lambda: None), repr=False)
-    default_parser = attrib(default=Factory(Parser), repr=False)
-    connections = attrib(default=Factory(list), init=False, repr=False)
-    started = attrib(default=Factory(lambda: None), init=False)
+    def __init__(
+        self,
+        port: int = 4000,
+        interface: str = "0.0.0.0",
+        factory: Optional[ServerFactory] = None,
+        default_parser: Parser = Parser(),
+        connections: List[Protocol] = [],
+        started: Optional[datetime] = None,
+    ) -> None:
 
-    def get_spell_checker(self, caller):
+        self.port = port
+        self.interface = interface
+        self.factory = factory
+        self.default_parser = default_parser
+        self.connections = connections
+        self.started = started
+
+        if self.factory is None:
+            self.factory = ServerFactory(self)
+
+    def get_spell_checker(self, caller: Caller) -> Optional[Type[SpellCheckerMenu]]:
         """Return a class which can be used for spell checking. This function
         should return a class dispite the fact that it is called with a fully-
         formed caller."""
         return SpellCheckerMenu
 
-    def __attrs_post_init__(self):
-        if self.factory is None:
-            self.factory = ServerFactory(self)
-
-    def is_banned(self, host):
+    def is_banned(self, host: str) -> bool:
         """Determine if host is banned. Simply returns False by default."""
         return False
 
-    def run(self):
+    def run(self) -> None:
         """Run the server."""
         if self.started is None:
             self.started = datetime.utcnow()
-        reactor.listenTCP(
-            self.port,
-            self.factory,
-            interface=self.interface
-        )
+        reactor.listenTCP(self.port, self.factory, interface=self.interface)
         logger.info(
-            'Now listening for connections on %s:%d.',
-            self.interface,
-            self.port
+            "Now listening for connections on %s:%d.", self.interface, self.port
         )
         self.on_start(Caller(None))
-        reactor.addSystemEventTrigger(
-            'before',
-            'shutdown',
-            self.on_stop,
-            Caller(None)
-        )
+        reactor.addSystemEventTrigger("before", "shutdown", self.on_stop, Caller(None))
         reactor.run()
 
-    def on_start(self, caller):
+    def on_start(self, caller: Caller) -> None:
         """The server has started. The passed instance of Caller does nothing,
         but ensures compatibility with the other events. Is called from
         Server.run."""
         pass
 
-    def on_stop(self, caller):
+    def on_stop(self, caller: Caller) -> None:
         """The server is about to stop. The passed instance of Caller does
         nothing but maintains compatibility with the other events. Is scheduled
         when Server.run is used."""
         pass
 
-    def on_connect(self, caller):
+    def on_connect(self, caller: Caller) -> None:
         """A connection has been established. Send welcome message ETC."""
         pass
 
-    def on_disconnect(self, caller):
+    def on_disconnect(self, caller: Caller) -> None:
         """A client has disconnected."""
         pass
 
-    def format_text(self, text, *args, **kwargs):
+    def format_text(self, text: str, *args: Any, **kwargs: Any) -> str:
         """Format text for use with notify and broadcast."""
         if args:
             text = text % args
@@ -109,39 +110,43 @@ class Server:
             text = text % kwargs
         return text
 
-    def notify(self, connection, text, *args, **kwargs):
+    def notify(
+        self,
+        connection: Protocol,
+        text: Union[str, Parser, Type[Parser]],
+        *args: Any,
+        **kwargs: Any
+    ) -> None:
         """Notify connection of text formatted with args and kwargs. Supports
         instances of, and the instanciation of Parser."""
         if connection is not None:
-            if isclass(text) and issubclass(text, Parser):
-                text = text(*args, **kwargs)
+            if isclass(text) and issubclass(cast(Type[Parser], text), Parser):
+                text = cast(Type[Parser], text)(*args, **kwargs)
             if isinstance(text, Parser):
                 connection.parser = text
             else:
                 connection.sendLine(
-                    self.format_text(
-                        text,
-                        *args,
-                        **kwargs
-                    ).encode(*connection.encode_args)
+                    self.format_text(cast(str, text), *args, **kwargs).encode(
+                        *connection.encode_args
+                    )
                 )
 
-    def broadcast(self, text, *args, **kwargs):
+    def broadcast(self, text: str, *args: Any, **kwargs: Any) -> None:
         """Notify all connections."""
         text = self.format_text(text, *args, **kwargs)
         for con in self.connections:
             self.notify(con, text)
 
-    def disconnect(self, connection):
+    def disconnect(self, connection: Protocol) -> None:
         """Disconnect a connection."""
         connection.transport.loseConnection()
 
-    def event(self, func):
+    def event(self, func: MethodType) -> None:
         """A decorator to override methods of self."""
         name = func.__name__
         if not hasattr(self, name):
-            raise AttributeError('No attribute named %s to override.' % name)
+            raise AttributeError("No attribute named %s to override." % name)
         elif not isinstance(getattr(self, name), MethodType):
-            raise TypeError('self.%s is not a method.' % name)
+            raise TypeError("self.%s is not a method." % name)
         else:
             setattr(self, name, MethodType(func, self))
