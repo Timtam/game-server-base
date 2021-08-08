@@ -122,7 +122,7 @@ class Parser:
         names: Union[str, Iterable[str]] = "",
         description: str = "",
         help: str = "",
-        args_regexp: Union[str, Pattern] = r"",
+        args_regexp: Optional[Union[str, Pattern]] = None,
         allowed: Callable[[Caller], bool] = lambda c: True,
     ) -> Command:
         ...
@@ -134,7 +134,7 @@ class Parser:
         names: Union[str, Iterable[str]] = "",
         description: str = "",
         help: str = "",
-        args_regexp: Union[str, Pattern] = r"",
+        args_regexp: Optional[Union[str, Pattern]] = None,
         allowed: Callable[[Caller], bool] = lambda c: True,
     ) -> Callable[[Callable[[Caller], None]], Command]:
         ...
@@ -145,7 +145,7 @@ class Parser:
         names: Union[str, Iterable[str]] = "",
         description: str = "",
         help: str = "",
-        args_regexp: Union[str, Pattern] = r"",
+        args_regexp: Optional[Union[str, Pattern]] = None,
         allowed: Callable[[Caller], bool] = lambda c: True,
     ) -> Union[Command, Callable[[Callable[[Caller], None]], Command]]:
         """
@@ -157,6 +157,8 @@ class Parser:
         """
 
         def inner(func: Callable[[Caller], None]) -> Command:
+
+            nonlocal names, description, help, args_regexp, allowed
             names = names or self.make_command_names(func)
             description = description or self.make_command_description(func)
             help = help or self.make_command_help(func)

@@ -6,6 +6,7 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 
+from twisted.internet.protocol import connectionDone
 from twisted.protocols.basic import LineReceiver
 from twisted.python.failure import Failure
 
@@ -84,7 +85,7 @@ class Protocol(LineReceiver):
         if self.parser is not None:
             self.parser.on_attach(self, None)
 
-    def connectionLost(self, reason: Failure) -> None:
+    def connectionLost(self, reason: Failure = connectionDone) -> None:
         """Call self.server.on_disconnect."""
         if self in self.server.connections:
             self.server.connections.remove(self)

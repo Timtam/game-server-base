@@ -1,6 +1,6 @@
 """Various allow functions for use with commands."""
 
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Tuple
+from typing import TYPE_CHECKING, Callable, Iterator, Tuple
 
 if TYPE_CHECKING:
 

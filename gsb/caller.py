@@ -1,6 +1,6 @@
 """Provides the Caller class."""
 
-from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence, Type
+from typing import TYPE_CHECKING, Any, Dict, Optional, Sequence
 
 if TYPE_CHECKING:
 

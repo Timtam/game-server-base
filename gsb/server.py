@@ -74,13 +74,13 @@ class Server:
         """Run the server."""
         if self.started is None:
             self.started = datetime.utcnow()
-        reactor.listenTCP(self.port, self.factory, interface=self.interface)
+        reactor.listenTCP(self.port, self.factory, interface=self.interface)  # type: ignore
         logger.info(
             "Now listening for connections on %s:%d.", self.interface, self.port
         )
         self.on_start(Caller(None))
-        reactor.addSystemEventTrigger("before", "shutdown", self.on_stop, Caller(None))
-        reactor.run()
+        reactor.addSystemEventTrigger("before", "shutdown", self.on_stop, Caller(None))  # type: ignore
+        reactor.run()  # type: ignore
 
     def on_start(self, caller: Caller) -> None:
         """The server has started. The passed instance of Caller does nothing,
@@ -139,7 +139,8 @@ class Server:
 
     def disconnect(self, connection: Protocol) -> None:
         """Disconnect a connection."""
-        connection.transport.loseConnection()
+        if connection.transport:
+            connection.transport.loseConnection()  # type: ignore
 
     def event(self, func: MethodType) -> None:
         """A decorator to override methods of self."""

@@ -26,7 +26,6 @@ from contextlib import contextmanager
 from typing import Any, Callable, List, Optional, Union
 
 from .caller import Caller
-from .command import Command
 from .parser import Parser
 from .protocol import Protocol
 

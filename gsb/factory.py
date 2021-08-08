@@ -38,6 +38,6 @@ class Factory(ServerFactory):
             return None
         else:
             logger.info("Incoming connection from %s:%d.", addr.host, addr.port)
-            return self.protocol(
+            return self.protocol(  # type: ignore
                 self.server, addr.host, addr.port, self.server.default_parser
             )
